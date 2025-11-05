@@ -1,0 +1,23 @@
+BasedOnStyle: LLVM
+---
+Language: Cpp
+# Force pointers to the type for C++.
+DerivePointerAlignment: false
+PointerAlignment: Left
+UseTab: Never
+IndentWidth: 4
+TabWidth: 4
+Standard: Cpp11
+ColumnLimit: 120
+---
+Language: JavaScript
+# Use 100 columns for JS.
+ColumnLimit: 100
+---
+Language: Proto
+# Don't format .proto files.
+DisableFormat: true
+---
+Language: CSharp
+# Use 100 columns for C#.
+ColumnLimit: 100

@@ -19,16 +19,22 @@
 #include <esp_littlefs.h>
 #include <esp_random.h>
 #include <esp_system.h>
+#include <esp_timer.h>
+
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include <errno.h>
 #include <inttypes.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 static const char* TAG = __FILE_NAME__;
 
-// Write random byte to the entiere buffer, to ensure heavy trafic to the PSRAM over SPI
-void psram_stresstest() {
+// Write random byte to the entiere buffer, to ensure heavy trafic to the PSRAM
+// over SPI
+static void psram_stresstest() {
     static uint8_t EXT_RAM_NOINIT_ATTR buffer[1024 * 1024];
 
     uint8_t byte = random() % 255;
@@ -41,7 +47,7 @@ void psram_stresstest() {
 
 #define BUFFER_SIZE 1024
 // write data to fs, fill in random data, check integrity
-bool littlefs_stresstest(const char* fname, int total_count) {
+static bool littlefs_stresstest(const char* fname, int total_count) {
     FILE* file = fopen(fname, "rb+");
 
     if (file == NULL) {
@@ -73,15 +79,18 @@ bool littlefs_stresstest(const char* fname, int total_count) {
             }
         } else
             ESP_LOGW(TAG, "error writing data to '%s' : %s\n", fname, strerror(errno));
+
+        printf(".");
+        fflush(stdout);
     }
 
     fclose(file);
 
-    printf("wrote %u bytes of data to flash, successfully\n", BUFFER_SIZE * count);
+    printf("\nwrote %u bytes of data to flash, successfully\n", BUFFER_SIZE * count);
     return true;
 }
 
-void littlefs_init() {
+static void littlefs_init() {
     esp_vfs_littlefs_conf_t conf = {.base_path = "/data",
                                     .partition_label = "storage",
                                     .format_if_mount_failed = true,
@@ -94,6 +103,20 @@ void littlefs_init() {
     ESP_ERROR_CHECK(esp_littlefs_info(conf.partition_label, &total, &used));
 
     ESP_LOGI(TAG, "littlefs disk size total %ld kB (used %ld bytes)", total / 1024, used);
+}
+
+static void psram_tester(void* data) {
+    while (1) {
+        psram_stresstest();
+        vTaskDelay(1);
+    }
+}
+
+static void flash_tester(void* data) {
+    while (1) {
+        littlefs_stresstest("/data/dumpdata.txt", 256);
+        vTaskDelay(1);
+    }
 }
 
 void app_main(void) {
@@ -113,6 +136,15 @@ void app_main(void) {
     printf("Now we are starting the LittleFs Demo ...\n");
 
     littlefs_init();
-    littlefs_stresstest("/data/dumpdata.txt", 256);
-    psram_stresstest();
+    srand(esp_timer_get_time());
+
+    // start the two test task on the same priority, for allowing resouce raise conditions
+    static uint8_t ucParameterToPass;
+    TaskHandle_t flashHandle = NULL, psHandle = NULL;
+
+    xTaskCreate(psram_tester, "psram_tester", 8192, &ucParameterToPass, tskIDLE_PRIORITY, &psHandle);
+    configASSERT(psHandle);
+
+    xTaskCreate(flash_tester, "flash_tester", 8192, &ucParameterToPass, tskIDLE_PRIORITY, &flashHandle);
+    configASSERT(flashHandle);
 }
